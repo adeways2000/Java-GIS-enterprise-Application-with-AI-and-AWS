@@ -42,7 +42,7 @@ aws:
 javagis:
   security:
     jwt:
-      secret-key: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+      secret-key: ${JWT_SECRET:jwt_secretkey}
       expiration: 86400000 # 1 day in milliseconds
       refresh-token:
         expiration: 604800000 # 7 days in milliseconds
@@ -86,3 +86,4 @@ springdoc:
     operationsSorter: method
     tagsSorter: alpha
   packages-to-scan: com.adeprogramming.javagis.controller
+
