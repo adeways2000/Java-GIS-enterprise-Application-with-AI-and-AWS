@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with PostGIS extension
+  database:
+    image: postgis/postgis:15-3.3
+    container_name: javagis-database
+    environment:
+      POSTGRES_DB: javagis_basf
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - javagis-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d javagis_basf"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Spring Boot Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: javagis-backend
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://database:5432/javagis_basf
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      AWS_ACCESS_KEY: ${AWS_ACCESS_KEY:-}
+      AWS_SECRET_KEY: ${AWS_SECRET_KEY:-}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-javagis-basf-assets}
+      JWT_SECRET: ${JWT_SECRET:-404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    ports:
+      - "8080:8080"
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - javagis-network
+    volumes:
+      - backend_logs:/app/logs
+      - ai_models:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./javagis-frontend
+      dockerfile: Dockerfile
+    container_name: javagis-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - javagis-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: javagis-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - javagis-network
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Nginx Load Balancer (optional for production)
+  nginx:
+    image: nginx:alpine
+    container_name: javagis-nginx
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - javagis-network
+    restart: unless-stopped
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+    driver: local
+  backend_logs:
+    driver: local
+  ai_models:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  javagis-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
